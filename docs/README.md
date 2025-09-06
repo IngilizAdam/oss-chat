@@ -9,6 +9,7 @@ A chat interface extension for Isaac Sim that allows you to interact with Large 
 - **Model Selection**: Choose from available models in your Ollama instance
 - **Conversation History**: Maintains chat history during your session
 - **Connection Management**: Easy configuration and connection testing
+- **Specialized System Prompt**: Pre-configured to help with Isaac Sim and robotics questions
 
 ## Prerequisites
 
@@ -69,6 +70,21 @@ Alternatively, run Isaac Sim with the flags:
 - **Default Model**: `llama3.2`
 
 You can modify these defaults in `global_variables.py`.
+
+### System Prompt
+
+The extension includes a hardcoded system prompt that makes the AI assistant specialized for Isaac Sim and robotics contexts. The system prompt configures the AI to be knowledgeable about:
+
+- Robotics and autonomous systems
+- 3D simulation and physics
+- NVIDIA Omniverse and Isaac Sim
+- Python programming for robotics
+- USD (Universal Scene Description)
+- Computer vision and AI for robotics
+- ROS (Robot Operating System)
+- Simulation best practices
+
+The system prompt is automatically included in every conversation but is not visible in the chat interface. To modify it, edit the `SYSTEM_PROMPT` variable in `global_variables.py`.
 
 ### Custom Ollama Setup
 

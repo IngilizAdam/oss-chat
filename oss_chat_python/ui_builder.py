@@ -168,7 +168,7 @@ class UIBuilder:
                 # Chat history display
                 self.chat_history_field = TextBlock(
                     "Chat History",
-                    text="Welcome to OSS Chat! Select a model and start chatting.\n\nMake sure Ollama is running and accessible.",
+                    text="Welcome to OSS Chat! 🤖\n\nI'm your AI assistant integrated with Isaac Sim, ready to help with robotics simulation, programming, and technical questions.\n\nSelect a model and start chatting!\n\nMake sure Ollama is running and accessible.",
                     num_lines=15,
                     tooltip="Chat conversation history",
                     include_copy_button=True,
@@ -227,7 +227,8 @@ class UIBuilder:
         """Callback when a model is selected"""
         self.chat_service.set_model(model_name)
         self._update_chat_display()
-        self._append_to_chat(f"\n--- Switched to model: {model_name} ---\n")
+        self._append_to_chat(f"\n--- 🔄 Switched to model: {model_name} ---")
+        self._append_to_chat(f"\n💡 I'm specialized for Isaac Sim and robotics questions!\n")
 
     def _on_message_input(self, message: str):
         """Callback when message input changes"""
@@ -276,7 +277,7 @@ class UIBuilder:
         """Callback for clear chat button"""
         self.chat_service.clear_conversation()
         if self.chat_history_field:
-            self.chat_history_field.set_text("Chat cleared. Start a new conversation!")
+            self.chat_history_field.set_text("Chat cleared! 🧹\n\nI'm ready to help with Isaac Sim, robotics, and simulation questions.\nStart a new conversation!")
         self._update_status("Chat history cleared")
 
     def _on_message_response(self, response: str, is_final: bool):
@@ -333,7 +334,10 @@ class UIBuilder:
             
         chat_text = ""
         for message in self.chat_service.conversation_history:
-            if message.role == "user":
+            # Skip system messages in the display (they're used internally)
+            if message.role == "system":
+                continue
+            elif message.role == "user":
                 chat_text += f"\n🧑 You: {message.content}\n"
             elif message.role == "assistant":
                 chat_text += f"🤖 Assistant: {message.content}\n"

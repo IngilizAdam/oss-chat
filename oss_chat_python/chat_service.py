@@ -29,6 +29,8 @@ except ImportError:
             print(f"INFO: {msg}")
     carb = MockCarb()
 
+from .global_variables import SYSTEM_PROMPT
+
 
 class ChatMessage:
     def __init__(self, role: str, content: str, timestamp: Optional[str] = None):
@@ -53,14 +55,22 @@ class OllamaChatService:
         self.current_model = None
         self.conversation_history: List[ChatMessage] = []
         self._is_generating = False
+        self._initialize_with_system_prompt()
+        
+    def _initialize_with_system_prompt(self):
+        """Initialize conversation with system prompt"""
+        if SYSTEM_PROMPT.strip():
+            self.conversation_history = [ChatMessage("system", SYSTEM_PROMPT)]
+        else:
+            self.conversation_history = []
         
     def set_model(self, model_name: str):
         """Set the current model to use for chat"""
         self.current_model = model_name
         
     def clear_conversation(self):
-        """Clear the conversation history"""
-        self.conversation_history = []
+        """Clear the conversation history but keep system prompt"""
+        self._initialize_with_system_prompt()
         
     def add_message(self, role: str, content: str) -> ChatMessage:
         """Add a message to the conversation history"""
