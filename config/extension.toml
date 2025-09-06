@@ -1,11 +1,11 @@
 [package]
 version = "1.0.1"
 category = "Simulation"
-title = "oss-chat"
-description = "A method to interact with oss from isaac sim."
+title = "OSS Chat"
+description = "Chat with LLM models through Ollama from Isaac Sim."
 authors = ["NVIDIA"]
 repository = ""
-keywords = []
+keywords = ["chat", "llm", "ollama", "ai"]
 changelog = "docs/CHANGELOG.md"
 readme = "docs/README.md"
 preview_image = "data/preview.png"
@@ -16,6 +16,7 @@ writeTarget.kit = true
 "isaacsim.core.api" = {}
 "isaacsim.gui.components" = {}
 "omni.kit.uiapp" = {}
+"omni.client" = {}
 
 [[python.module]]
 name = "oss_chat_python"
