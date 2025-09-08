@@ -118,11 +118,11 @@ class OllamaChatService:
             return ["llama3.2", "llama2", "mistral"]  # Default fallback models
     
     def send_message_sync(self, message: str, callback: Callable[[str, bool], None]):
-        """Send a message synchronously in a separate thread"""
+        """Send a message synchronously in a separate thread, streaming response."""
         def _send_message():
             try:
-                import urllib.request
-                import urllib.error
+                import http.client
+                from urllib.parse import urlparse
                 
                 if not self.current_model:
                     callback("Error: No model selected", True)
@@ -136,58 +136,56 @@ class OllamaChatService:
                 payload = {
                     "model": self.current_model,
                     "messages": [msg.to_dict() for msg in self.conversation_history],
-                    "stream": False  # Using non-streaming for urllib compatibility
+                    "stream": True  # Enable streaming
                 }
-                
                 self._is_generating = True
-                
+                response_content = ""
                 try:
-                    # Create POST request with proper headers
-                    data = json.dumps(payload).encode('utf-8')
-                    req = urllib.request.Request(
-                        url,
-                        data=data,
-                        headers={
-                            'Content-Type': 'application/json',
-                            'Content-Length': str(len(data)),
-                            'User-Agent': 'OSS-Chat-Extension/1.0',
-                            'Accept': 'application/json'
-                        },
-                        method='POST'
-                    )
-                    
-                    carb.log_info(f"Sending message to: {url}")
-                    
-                    with urllib.request.urlopen(req, timeout=120) as response:
-                        if response.status == 200:
-                            result = json.loads(response.read().decode('utf-8'))
-                            response_content = result.get('message', {}).get('content', '')
-                            
-                            if response_content:
-                                # Add assistant response to history
-                                self.add_message("assistant", response_content)
-                                callback(response_content, True)  # Final response
-                            else:
-                                callback("Error: Empty response from model", True)
-                        else:
-                            callback(f"Error: Server returned status {response.status}", True)
-                            
-                except urllib.error.HTTPError as e:
-                    error_msg = f"HTTP Error: {e.code} - {e.reason}"
+                    carb.log_info(f"Streaming message to: {url}")
+                    parsed = urlparse(url)
+                    conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+                    conn = conn_cls(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), timeout=120)
+                    headers = {
+                        "Content-Type": "application/json",
+                        "User-Agent": "OSS-Chat-Extension/1.0",
+                        "Accept": "application/json"
+                    }
+                    conn.request("POST", parsed.path, body=json.dumps(payload), headers=headers)
+                    resp = conn.getresponse()
+                    if resp.status != 200:
+                        callback(f"Error: Server returned status {resp.status}", True)
+                        return
+                    # Read the response as a stream
+                    for line in resp:
+                        if not line:
+                            continue
+                        try:
+                            json_response = json.loads(line.decode('utf-8'))
+                        except Exception:
+                            continue
+                        if 'message' in json_response:
+                            content = json_response['message'].get('content', '')
+                            if content:
+                                response_content += content
+                                callback(response_content, False)  # Partial response
+                        if json_response.get('done', False):
+                            break
+                    # Add assistant response to history
+                    if response_content:
+                        self.add_message("assistant", response_content)
+                        callback(response_content, True)  # Final response
+                    else:
+                        callback("Error: Empty response from model", True)
+                except Exception as e:
+                    error_msg = f"Streaming error: {str(e)}"
                     carb.log_error(error_msg)
                     callback(error_msg, True)
-                except urllib.error.URLError as e:
-                    error_msg = f"Error communicating with Ollama: {str(e)}"
-                    carb.log_error(error_msg)
-                    callback(error_msg, True)
-                    
+                finally:
+                    self._is_generating = False
             except Exception as e:
                 error_msg = f"Unexpected error: {str(e)}"
                 carb.log_error(error_msg)
                 callback(error_msg, True)
-            finally:
-                self._is_generating = False
-        
         # Run in separate thread to avoid blocking UI
         thread = threading.Thread(target=_send_message)
         thread.daemon = True
