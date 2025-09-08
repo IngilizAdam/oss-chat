@@ -20,7 +20,7 @@ EXTENSION_TITLE = "OSS Chat"
 EXTENSION_DESCRIPTION = "Chat with LLM models through Ollama from Isaac Sim."
 
 # Default Ollama configuration
-DEFAULT_OLLAMA_HOST = "http://192.168.1.11:11500"
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.2"
 
 # System prompt - loaded from file

@@ -22,7 +22,6 @@ from isaacsim.gui.components.element_wrappers import (
     CollapsableFrame,
     DropDown,
     StringField,
-    TextBlock,
 )
 from isaacsim.gui.components.ui_utils import get_style
 
@@ -53,6 +52,10 @@ class UIBuilder:
         
         # Chat state
         self.is_waiting_for_response = False
+        
+        # New message-based chat system
+        self.chat_messages = []
+        self.chat_container = None
 
     ###################################################################################
     #           The Functions Below Are Called Automatically By extension.py
@@ -125,11 +128,14 @@ class UIBuilder:
                 )
                 self.wrapped_ui_elements.append(self.ollama_host_field)
                 
-                self.connection_status_field = TextBlock(
-                    "Connection Status",
-                    text="Not connected",
-                    num_lines=1,
+                self.connection_status_field = ui.Label(
+                    "Not connected",
+                    height=20,
                     tooltip="Shows the current connection status to Ollama",
+                    style={
+                        "color": 0xFFCCCCCC,
+                        "font_size": 12,
+                    }
                 )
                 
                 test_connection_button = Button(
@@ -165,25 +171,191 @@ class UIBuilder:
         
         with chat_frame:
             with ui.VStack(style=get_style(), spacing=5, height=0):
-                # Chat history display
-                self.chat_history_field = TextBlock(
-                    "Chat History",
-                    text="Welcome to OSS Chat! 🤖\n\nI'm your AI assistant integrated with Isaac Sim, ready to help with robotics simulation, programming, and technical questions.\n\nSelect a model and start chatting!\n\nMake sure Ollama is running and accessible.",
-                    num_lines=15,
-                    tooltip="Chat conversation history",
-                    include_copy_button=True,
-                )
+                # Chat history header with copy button
+                with ui.HStack(height=25):
+                    ui.Label("Chat History", height=20)
+                    ui.Spacer()
+                    self._copy_button = ui.Button("Copy All", width=80, height=20)
+                    self._copy_button.set_clicked_fn(self._copy_chat_to_clipboard)
                 
-                # Message input
+                # Create a scrollable chat area with multiple UI elements approach
+                with ui.ScrollingFrame(
+                    height=400,  # Increased height for better visibility
+                    horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+                    vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON,
+                    style={
+                        "ScrollingFrame": {
+                            "background_color": 0x23212121,
+                            "border_color": 0x33444444,
+                            "border_width": 1,
+                            "border_radius": 4,
+                        }
+                    }
+                ):
+                    # Create a VStack to hold individual message elements with more spacing
+                    self.chat_container = ui.VStack(spacing=8)  # Increased spacing between messages
+                    with self.chat_container:
+                        # Add welcome message as a label
+                        welcome_text = (
+                            "=== Welcome to OSS Chat! ===\n"
+                            "=" * 50 + "\n\n"
+                            "I'm your AI assistant integrated with Isaac Sim, ready to help with:\n"
+                            "* Robotics simulation\n"
+                            "* Programming & scripting\n"
+                            "* Technical questions\n" 
+                            "* Isaac Sim documentation\n\n"
+                            "NEW FEATURES:\n"
+                            "* Full text selection & copying\n" 
+                            "* Scrollable chat history\n"
+                            "* Enhanced formatting\n\n"
+                            "TIP: Use the 'Copy All' button to copy the entire chat!\n\n"
+                            "Setup: Select a model and start chatting!\n"
+                            "Make sure Ollama is running and accessible."
+                        )
+                        
+                        # Store messages as a list for better management
+                        self.chat_messages = []
+                        self._add_welcome_message(welcome_text)
+                
+                # Message input with enhanced styling
                 self.message_input_field = StringField(
                     "Message",
                     default_value="",
-                    tooltip="Type your message here and press Enter or click Send",
+                    tooltip="Type your message here. Press Ctrl+Enter for new line, Enter to send (when implemented)",
                     read_only=False,
                     multiline_okay=True,
                     on_value_changed_fn=self._on_message_input,
                 )
                 self.wrapped_ui_elements.append(self.message_input_field)
+
+    def _add_welcome_message(self, text):
+        """Add the welcome message to chat"""
+        if hasattr(self, 'chat_container') and self.chat_container:
+            with self.chat_container:
+                ui.Label(
+                    text, 
+                    word_wrap=True,
+                    style={
+                        "color": 0xFFCCCCCC,
+                        "font_size": 12,
+                        "margin": 5,
+                        "padding": 5
+                    }
+                )
+
+    def _add_message_to_chat(self, sender, message, message_type="normal"):
+        """Add a message to the chat display as a separate UI element"""
+        if not hasattr(self, 'chat_container') or not self.chat_container:
+            return
+            
+        # Choose styling based on message type
+        if message_type == "user":
+            color = 0xFF88AAFF  # Light blue for user
+            prefix = "You: "
+        elif message_type == "assistant":
+            color = 0xFF88FF88  # Light green for assistant  
+            prefix = "Assistant: "
+        elif message_type == "system":
+            color = 0xFFFFAA88  # Light orange for system
+            prefix = "System: "
+        else:
+            color = 0xFFCCCCCC  # Default white
+            prefix = f"{sender}: " if sender else ""
+        
+        display_text = prefix + message
+        
+        try:
+            with self.chat_container:
+                # Add a subtle separator for better visual separation (except for first message)
+                if hasattr(self, 'chat_messages') and self.chat_messages:
+                    ui.Spacer(height=3)
+                    ui.Rectangle(height=1, style={"background_color": 0x22444444})
+                    ui.Spacer(height=3)
+                
+                # Create a selectable text field for each message
+                # Calculate proper height based on content length
+                lines = display_text.split('\n')
+                estimated_lines = max(1, len(lines))
+                
+                # Add extra lines for text wrapping (approximate 80 chars per line)
+                for line in lines:
+                    if len(line) > 80:
+                        estimated_lines += (len(line) // 80)
+                
+                # Set minimum height and scale with content
+                min_height = 30  # Increased minimum height
+                line_height = 20  # Slightly increased line height for better readability
+                calculated_height = max(min_height, estimated_lines * line_height)
+                
+                # Cap maximum height to prevent extremely tall boxes
+                max_height = 400 if message_type == "assistant" else 200  # Increased max heights
+                final_height = min(calculated_height, max_height)
+                
+                message_field = ui.StringField(
+                    multiline=True,
+                    read_only=True,
+                    height=ui.Pixel(final_height),
+                    style={
+                        "StringField": {
+                            "background_color": 0x15000000,  # Slightly more visible background
+                            "border_width": 1,
+                            "border_color": 0x22444444,  # Subtle border
+                            "border_radius": 3,
+                            "color": color,
+                            "font_size": 12,
+                            "margin": 3,
+                            "padding": 8  # Increased padding for better readability
+                        }
+                    }
+                )
+                
+                # Set the message text with safe encoding
+                try:
+                    # Convert any problematic characters to safe alternatives
+                    safe_text = display_text.encode('ascii', errors='replace').decode('ascii')
+                    message_field.model.set_value(safe_text)
+                except Exception:
+                    message_field.model.set_value(str(display_text))
+                
+                # Store reference for copying functionality
+                if not hasattr(self, 'chat_messages'):
+                    self.chat_messages = []
+                
+                self.chat_messages.append({
+                    'field': message_field,
+                    'text': display_text,
+                    'type': message_type
+                })
+        except Exception as e:
+            # Fallback if container is not available
+            print(f"Could not add message to chat: {e}")
+
+    def _update_message_field_height(self, field, text):
+        """Update the height of a message field based on content"""
+        try:
+            lines = text.split('\n')
+            estimated_lines = max(1, len(lines))
+            
+            # Add extra lines for text wrapping (approximate 80 chars per line)
+            for line in lines:
+                if len(line) > 80:
+                    estimated_lines += (len(line) // 80)
+            
+            # Set minimum height and scale with content (matching _add_message_to_chat)
+            min_height = 30
+            line_height = 20
+            calculated_height = max(min_height, estimated_lines * line_height)
+            
+            # Cap maximum height for assistant responses
+            max_height = 400
+            final_height = min(calculated_height, max_height)
+            
+            # Update the field height
+            field.height = ui.Pixel(final_height)
+            
+        except Exception as e:
+            # Fallback to a reasonable default height
+            field.height = ui.Pixel(100)
 
     def _create_controls_frame(self):
         """Create the control buttons frame"""
@@ -209,6 +381,87 @@ class UIBuilder:
                     )
                     self.wrapped_ui_elements.append(self.clear_button)
 
+    def _copy_chat_to_clipboard(self):
+        """Copy the entire chat history to clipboard"""
+        chat_text = self._get_all_chat_text()
+        try:
+            # Try to use system clipboard if available
+            try:
+                import tkinter as tk
+                root = tk.Tk()
+                root.withdraw()  # Hide the window
+                root.clipboard_clear()
+                root.clipboard_append(chat_text)
+                root.update()
+                root.destroy()
+                self._add_message_to_chat("System", "Chat copied to clipboard!", "system")
+            except ImportError:
+                # Show a selectable text dialog as fallback
+                self._show_copyable_text_dialog(chat_text)
+        except Exception as e:
+            # Fallback: Show the text in a new selectable dialog
+            self._show_copyable_text_dialog(chat_text)
+
+    def _show_copyable_text_dialog(self, text):
+        """Show a dialog with selectable text for manual copying"""
+        # Create a simple window with selectable text
+        copy_window = ui.Window("Copy Chat History", width=500, height=400)
+        with copy_window.frame:
+            with ui.VStack(spacing=10):
+                ui.Label("Select and copy the text below (Ctrl+A to select all):", height=20)
+                text_field = ui.StringField(
+                    multiline=True,
+                    read_only=True,
+                    height=ui.Percent(90),
+                    style={
+                        "StringField": {
+                            "background_color": 0x23212121,
+                            "border_color": 0x33444444, 
+                            "border_width": 1,
+                            "color": 0xFFCCCCCC,
+                            "font_size": 12,
+                            "padding": 8
+                        }
+                    }
+                )
+                text_field.model.set_value(text)
+                
+                def close_dialog():
+                    copy_window.visible = False
+                
+                close_button = ui.Button("Close", height=30)
+                close_button.set_clicked_fn(close_dialog)
+
+    def _safe_set_text(self, text):
+        """Safely set text with proper encoding handling"""
+        if self.chat_history_field:
+            try:
+                # Ensure the text is properly encoded as UTF-8
+                if isinstance(text, str):
+                    # Replace problematic characters with ASCII alternatives
+                    safe_text = text.encode('ascii', errors='replace').decode('ascii')
+                    self.chat_history_field.model.set_value(safe_text)
+                else:
+                    self.chat_history_field.model.set_value(str(text))
+            except Exception as e:
+                # Fallback to simple string conversion
+                self.chat_history_field.model.set_value(str(text))
+
+    def _safe_get_text(self):
+        """Safely get text with proper encoding handling"""
+        if self.chat_history_field:
+            try:
+                return self.chat_history_field.model.get_value_as_string()
+            except Exception:
+                return ""
+        return ""
+
+    def _auto_scroll_to_bottom(self):
+        """Auto-scroll the chat to the bottom"""
+        # This is a placeholder for auto-scroll functionality
+        # The ScrollingFrame should automatically scroll to bottom when content is added
+        pass
+
     ###################################################################################
     #           Chat-specific callback functions
     ###################################################################################
@@ -227,8 +480,8 @@ class UIBuilder:
         """Callback when a model is selected"""
         self.chat_service.set_model(model_name)
         self._update_chat_display()
-        self._append_to_chat(f"\n--- 🔄 Switched to model: {model_name} ---")
-        self._append_to_chat(f"\n💡 I'm specialized for Isaac Sim and robotics questions!\n")
+        self._append_to_chat(f"\n--- Switched to model: {model_name} ---")
+        self._append_to_chat(f"\nI'm specialized for Isaac Sim and robotics questions!\n")
 
     def _on_message_input(self, message: str):
         """Callback when message input changes"""
@@ -239,28 +492,31 @@ class UIBuilder:
         """Callback for send message button"""
         try:
             if self.is_waiting_for_response:
-                self._append_to_chat("⏳ Please wait for the current response to complete.\n")
+                self._add_message_to_chat("System", "Please wait for the current response to complete.", "system")
                 return
                 
             if not self.message_input_field:
-                self._append_to_chat("❌ Error: Message input field not available.\n")
+                self._add_message_to_chat("System", "ERROR: Message input field not available.", "system")
                 return
                 
             message = self.message_input_field.get_value().strip()
             if not message:
-                self._append_to_chat("⚠️ Please enter a message.\n")
+                self._add_message_to_chat("System", "WARNING: Please enter a message.", "system")
                 return
                 
             if not self.chat_service.current_model:
-                self._append_to_chat("❌ Error: Please select a model first.\n")
+                self._add_message_to_chat("System", "ERROR: Please select a model first.", "system")
                 return
             
             # Clear input field
             self.message_input_field.set_value("")
             
             # Add user message to chat display
-            self._append_to_chat(f"\n🧑 You: {message}\n")
-            self._append_to_chat("🤖 Assistant: ")
+            self._add_message_to_chat("You", message, "user")
+            
+            # Add placeholder for assistant response
+            self._current_assistant_message_index = len(self.chat_messages)
+            self._add_message_to_chat("Assistant", "...", "assistant")
             
             # Disable send button while waiting (by setting flag)
             self.is_waiting_for_response = True
@@ -269,15 +525,22 @@ class UIBuilder:
             self.chat_service.send_message_sync(message, self._on_message_response)
             
         except Exception as e:
-            error_msg = f"❌ Error sending message: {str(e)}"
-            self._append_to_chat(f"\n{error_msg}\n")
+            error_msg = f"ERROR sending message: {str(e)}"
+            self._add_message_to_chat("System", error_msg, "system")
             self.is_waiting_for_response = False
 
     def _on_clear_chat(self):
         """Callback for clear chat button"""
         self.chat_service.clear_conversation()
-        if self.chat_history_field:
-            self.chat_history_field.set_text("Chat cleared! 🧹\n\nI'm ready to help with Isaac Sim, robotics, and simulation questions.\nStart a new conversation!")
+        self._clear_chat_messages()
+        
+        # Add welcome message back
+        welcome_text = (
+            "Chat cleared!\n\n"
+            "I'm ready to help with Isaac Sim, robotics, and simulation questions.\n"
+            "Start a new conversation!"
+        )
+        self._add_welcome_message(welcome_text)
         self._update_status("Chat history cleared")
 
     def _on_message_response(self, response: str, is_final: bool):
@@ -285,69 +548,87 @@ class UIBuilder:
         if is_final:
             # Final response - enable send button and update full response
             self.is_waiting_for_response = False
-            # Note: Button enabled state will be checked in _on_send_message
-            
-            # Update the last assistant message in the chat display
-            if self.chat_history_field:
-                current_text = self.chat_history_field.get_text()
-                lines = current_text.split('\n')
-                
-                # Find the last "Assistant:" line and replace everything after it
-                for i in range(len(lines) - 1, -1, -1):
-                    if "🤖 Assistant:" in lines[i]:
-                        lines[i] = f"🤖 Assistant: {response}"
-                        # Remove any lines after this assistant response
-                        lines = lines[:i+1]
-                        break
-                
-                updated_text = '\n'.join(lines) + '\n'
-                self.chat_history_field.set_text(updated_text)
+            # Update the last assistant message with the final response
+            if hasattr(self, '_current_assistant_message_index') and hasattr(self, 'chat_messages'):
+                if self._current_assistant_message_index < len(self.chat_messages):
+                    msg = self.chat_messages[self._current_assistant_message_index]
+                    if msg['field']:
+                        try:
+                            safe_response = response.encode('ascii', errors='replace').decode('ascii')
+                            full_text = "Assistant: " + safe_response
+                            msg['field'].model.set_value(full_text)
+                            msg['text'] = "Assistant: " + response
+                            # Update height based on content
+                            self._update_message_field_height(msg['field'], full_text)
+                        except Exception:
+                            full_text = "Assistant: " + str(response)
+                            msg['field'].model.set_value(full_text)
+                            msg['text'] = "Assistant: " + str(response)
+                            self._update_message_field_height(msg['field'], full_text)
         else:
             # Partial response - update the display incrementally
             self._update_assistant_response(response)
 
     def _append_to_chat(self, text: str):
         """Append text to the chat history display"""
-        if self.chat_history_field:
-            current_text = self.chat_history_field.get_text()
-            self.chat_history_field.set_text(current_text + text)
+        # For simple status messages, add as system messages
+        self._add_message_to_chat("", text, "system")
+        self._auto_scroll_to_bottom()
+
+    def _clear_chat_messages(self):
+        """Clear all chat messages"""
+        if hasattr(self, 'chat_messages'):
+            self.chat_messages.clear()
+        # Clear the container
+        if hasattr(self, 'chat_container') and self.chat_container:
+            self.chat_container.clear()
+
+    def _get_all_chat_text(self):
+        """Get all chat text for copying"""
+        if hasattr(self, 'chat_messages') and self.chat_messages:
+            return '\n'.join([msg['text'] for msg in self.chat_messages])
+        return "No chat history available."
 
     def _update_assistant_response(self, response: str):
         """Update the current assistant response in the chat display"""
-        if self.chat_history_field:
-            current_text = self.chat_history_field.get_text()
-            lines = current_text.split('\n')
-            
-            # Find the last "Assistant:" line and update it
-            for i in range(len(lines) - 1, -1, -1):
-                if "🤖 Assistant:" in lines[i]:
-                    lines[i] = f"🤖 Assistant: {response}"
-                    break
-            
-            updated_text = '\n'.join(lines)
-            self.chat_history_field.set_text(updated_text)
+        if hasattr(self, '_current_assistant_message_index') and hasattr(self, 'chat_messages'):
+            if self._current_assistant_message_index < len(self.chat_messages):
+                msg = self.chat_messages[self._current_assistant_message_index]
+                if msg['field']:
+                    try:
+                        safe_response = response.encode('ascii', errors='replace').decode('ascii')
+                        full_text = "Assistant: " + safe_response
+                        msg['field'].model.set_value(full_text)
+                        msg['text'] = "Assistant: " + response
+                        # Update height based on content during streaming
+                        self._update_message_field_height(msg['field'], full_text)
+                    except Exception:
+                        full_text = "Assistant: " + str(response)
+                        msg['field'].model.set_value(full_text)
+                        msg['text'] = "Assistant: " + str(response)
+                        self._update_message_field_height(msg['field'], full_text)
 
     def _update_chat_display(self):
         """Update the chat display with current conversation history"""
-        if not self.chat_service.conversation_history or not self.chat_history_field:
+        if not self.chat_service.conversation_history:
             return
-            
-        chat_text = ""
+        
+        # Clear existing messages and rebuild from conversation history
+        self._clear_chat_messages()
+        
         for message in self.chat_service.conversation_history:
             # Skip system messages in the display (they're used internally)
             if message.role == "system":
                 continue
             elif message.role == "user":
-                chat_text += f"\n🧑 You: {message.content}\n"
+                self._add_message_to_chat("You", message.content, "user")
             elif message.role == "assistant":
-                chat_text += f"🤖 Assistant: {message.content}\n"
-        
-        self.chat_history_field.set_text(chat_text)
+                self._add_message_to_chat("Assistant", message.content, "assistant")
 
     def _update_status(self, message: str):
         """Update the connection status"""
         if self.connection_status_field:
-            self.connection_status_field.set_text(message)
+            self.connection_status_field.text = message
 
     async def _test_connection(self):
         """Test connection to Ollama server"""
@@ -355,19 +636,19 @@ class UIBuilder:
         try:
             is_connected = await self.chat_service.test_connection()
             if is_connected:
-                self._update_status("✅ Connected to Ollama")
+                self._update_status("Connected to Ollama")
             else:
-                self._update_status(f"❌ Connection failed to {self.chat_service.host}")
+                self._update_status(f"Connection failed to {self.chat_service.host}")
                 # Also show in chat
-                self._append_to_chat(f"\n⚠️ Connection failed to {self.chat_service.host}\n")
+                self._append_to_chat(f"\nConnection failed to {self.chat_service.host}\n")
                 self._append_to_chat("Please check:\n")
                 self._append_to_chat("1. Ollama is running on the target server\n")
                 self._append_to_chat("2. The server allows connections from your IP\n")
                 self._append_to_chat("3. No firewall is blocking port 11434\n\n")
         except Exception as e:
-            error_msg = f"❌ Connection error: {str(e)}"
+            error_msg = f"Connection error: {str(e)}"
             self._update_status(error_msg)
-            self._append_to_chat(f"\n⚠️ Connection error: {str(e)}\n\n")
+            self._append_to_chat(f"\nConnection error: {str(e)}\n\n")
 
     async def _load_models(self):
         """Load available models from Ollama"""
@@ -387,9 +668,9 @@ class UIBuilder:
                     
                 # Show success in chat
                 if len(models) > 3:  # More than just fallback models
-                    self._append_to_chat(f"📦 Loaded {len(models)} models from Ollama server\n\n")
+                    self._append_to_chat(f"Loaded {len(models)} models from Ollama server\n\n")
                 else:
-                    self._append_to_chat(f"⚠️ Using fallback models. Check connection to load actual models.\n\n")
+                    self._append_to_chat(f"Using fallback models. Check connection to load actual models.\n\n")
         except Exception as e:
             error_msg = f"Error loading models: {str(e)}"
-            self._append_to_chat(f"\n⚠️ {error_msg}\n\n")
+            self._append_to_chat(f"\n{error_msg}\n\n")
