@@ -216,12 +216,12 @@ class UIBuilder:
     def _on_host_changed(self, new_host: str):
         """Callback when Ollama host is changed"""
         self.chat_service.host = new_host.rstrip("/")
-        asyncio.ensure_future(self._test_connection())
-        asyncio.ensure_future(self._load_models())
+        # Only update host, do not test connection or load models automatically
 
     def _on_test_connection(self):
         """Callback for test connection button"""
         asyncio.ensure_future(self._test_connection())
+        asyncio.ensure_future(self._load_models())
 
     def _on_model_selection(self, model_name: str):
         """Callback when a model is selected"""
