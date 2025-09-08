@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.2] - 2025-09-07
+### Changed
+- System prompt is now loaded from `system_prompt.txt` file instead of being hardcoded
+- Improved system prompt flexibility and editability
+
+### Added
+- `system_prompt.txt` file for easy system prompt customization
+- File-based system prompt loading with error handling and fallback
+
 ## [1.0.1] - 2025-01-21
 ### Changed
 - Completely redesigned as a chat interface for LLM interaction

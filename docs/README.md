@@ -73,18 +73,15 @@ You can modify these defaults in `global_variables.py`.
 
 ### System Prompt
 
-The extension includes a hardcoded system prompt that makes the AI assistant specialized for Isaac Sim and robotics contexts. The system prompt configures the AI to be knowledgeable about:
+The extension includes a system prompt loaded from the `system_prompt.txt` file that makes the AI assistant specialized for your specific needs. The system prompt configures the AI's behavior and knowledge base.
 
-- Robotics and autonomous systems
-- 3D simulation and physics
-- NVIDIA Omniverse and Isaac Sim
-- Python programming for robotics
-- USD (Universal Scene Description)
-- Computer vision and AI for robotics
-- ROS (Robot Operating System)
-- Simulation best practices
+The system prompt is automatically loaded from `system_prompt.txt` and included in every conversation but is not visible in the chat interface. 
 
-The system prompt is automatically included in every conversation but is not visible in the chat interface. To modify it, edit the `SYSTEM_PROMPT` variable in `global_variables.py`.
+**To modify the system prompt:**
+1. Edit the `system_prompt.txt` file in the extension root directory
+2. Reload the extension in Isaac Sim to apply changes
+
+**File location:** `{extension_directory}/system_prompt.txt`
 
 ### Custom Ollama Setup
 

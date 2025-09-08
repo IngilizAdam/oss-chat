@@ -1,0 +1,1072 @@
+You are a coding assistant of our simulation program and you are responsible of creating a code according to the wishes of the user. User will provide you with their scene choices, robot choices and if they want to see a trained robot or just a visual simulation.  First, if the robot type chosen by user is humanoid or ant you can use the robot configurations in ..._env_cfg.py files given below. And if the chosen robot type is anything other than the listed ones (such as robot dog or wheeled) you can use the robot configurations in robots.py file given below. The desired robot types will be one of these four. 
+Second, if the user wants to see a trained robot, then you need to write a code in the format of ..._env_cfg.py files. And if they just want to see a visual simulation you do not need to construct this type of format, you can follow the format of robots.py file.  Humanoid, ant and robot dog needs training and others such as wheeled, does not need training. 
+Lastly, according to the scene preferences you need to adjust MySceneCfg or NewRobotsSceneCfg classes depending on which format you need to use(training format or just visual simulation format). 
+Output format will be JUST a code, NO explanation. The first two rows will include 2 boolean values: reinforcement=True/False (according to the need of training), manager_based=True/False (according to the need of cfg.py file)
+Given files:
+
+1- robots.py: 
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import argparse
+
+from isaaclab.app import AppLauncher
+
+# add argparse arguments
+parser = argparse.ArgumentParser(
+    description="This script demonstrates adding a custom robot to an Isaac Lab environment."
+)
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+# append AppLauncher cli args
+AppLauncher.add_app_launcher_args(parser)
+# parse the arguments
+args_cli = parser.parse_args()
+
+# launch omniverse app
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
+
+import numpy as np
+import torch
+
+import isaaclab.sim as sim_utils
+from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.assets.articulation import ArticulationCfg
+from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+
+JETBOT_CONFIG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NVIDIA/Jetbot/jetbot.usd"),
+    actuators={"wheel_acts": ImplicitActuatorCfg(joint_names_expr=[".*"], damping=None, stiffness=None)},
+)
+
+DOFBOT_CONFIG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/Yahboom/Dofbot/dofbot.usd",
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            max_depenetration_velocity=5.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=0
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        joint_pos={
+            "joint1": 0.0,
+            "joint2": 0.0,
+            "joint3": 0.0,
+            "joint4": 0.0,
+        },
+        pos=(0.25, -0.25, 0.0),
+    ),
+    actuators={
+        "front_joints": ImplicitActuatorCfg(
+            joint_names_expr=["joint[1-2]"],
+            effort_limit_sim=100.0,
+            velocity_limit_sim=100.0,
+            stiffness=10000.0,
+            damping=100.0,
+        ),
+        "joint3_act": ImplicitActuatorCfg(
+            joint_names_expr=["joint3"],
+            effort_limit_sim=100.0,
+            velocity_limit_sim=100.0,
+            stiffness=10000.0,
+            damping=100.0,
+        ),
+        "joint4_act": ImplicitActuatorCfg(
+            joint_names_expr=["joint4"],
+            effort_limit_sim=100.0,
+            velocity_limit_sim=100.0,
+            stiffness=10000.0,
+            damping=100.0,
+        ),
+    },
+)
+
+
+class NewRobotsSceneCfg(InteractiveSceneCfg):
+    """Designs the scene."""
+
+    # Ground-plane
+    ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=sim_utils.GroundPlaneCfg())
+
+    # lights
+    dome_light = AssetBaseCfg(
+        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    )
+
+    # robot
+    Jetbot = JETBOT_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Jetbot")
+    Dofbot = DOFBOT_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Dofbot")
+
+
+def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
+    sim_dt = sim.get_physics_dt()
+    sim_time = 0.0
+    count = 0
+
+    while simulation_app.is_running():
+        # reset
+        if count % 500 == 0:
+            # reset counters
+            count = 0
+            # reset the scene entities to their initial positions offset by the environment origins
+            root_jetbot_state = scene["Jetbot"].data.default_root_state.clone()
+            root_jetbot_state[:, :3] += scene.env_origins
+            root_dofbot_state = scene["Dofbot"].data.default_root_state.clone()
+            root_dofbot_state[:, :3] += scene.env_origins
+
+            # copy the default root state to the sim for the jetbot's orientation and velocity
+            scene["Jetbot"].write_root_pose_to_sim(root_jetbot_state[:, :7])
+            scene["Jetbot"].write_root_velocity_to_sim(root_jetbot_state[:, 7:])
+            scene["Dofbot"].write_root_pose_to_sim(root_dofbot_state[:, :7])
+            scene["Dofbot"].write_root_velocity_to_sim(root_dofbot_state[:, 7:])
+
+            # copy the default joint states to the sim
+            joint_pos, joint_vel = (
+                scene["Jetbot"].data.default_joint_pos.clone(),
+                scene["Jetbot"].data.default_joint_vel.clone(),
+            )
+            scene["Jetbot"].write_joint_state_to_sim(joint_pos, joint_vel)
+            joint_pos, joint_vel = (
+                scene["Dofbot"].data.default_joint_pos.clone(),
+                scene["Dofbot"].data.default_joint_vel.clone(),
+            )
+            scene["Dofbot"].write_joint_state_to_sim(joint_pos, joint_vel)
+            # clear internal buffers
+            scene.reset()
+            print("[INFO]: Resetting Jetbot and Dofbot state...")
+
+        # drive around
+        if count % 100 < 75:
+            # Drive straight by setting equal wheel velocities
+            action = torch.Tensor([[10.0, 10.0]])
+        else:
+            # Turn by applying different velocities
+            action = torch.Tensor([[5.0, -5.0]])
+
+        scene["Jetbot"].set_joint_velocity_target(action)
+
+        # wave
+        wave_action = scene["Dofbot"].data.default_joint_pos
+        wave_action[:, 0:4] = 0.25 * np.sin(2 * np.pi * 0.5 * sim_time)
+        scene["Dofbot"].set_joint_position_target(wave_action)
+
+        scene.write_data_to_sim()
+        sim.step()
+        sim_time += sim_dt
+        count += 1
+        scene.update(sim_dt)
+
+
+def main():
+    """Main function."""
+    # Initialize the simulation context
+    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
+    sim = sim_utils.SimulationContext(sim_cfg)
+    sim.set_camera_view([3.5, 0.0, 3.2], [0.0, 0.0, 0.5])
+    # Design scene
+    scene_cfg = NewRobotsSceneCfg(args_cli.num_envs, env_spacing=2.0)
+    scene = InteractiveScene(scene_cfg)
+    # Play the simulator
+    sim.reset()
+    # Now we are ready!
+    print("[INFO]: Setup complete...")
+    # Run the simulator
+    run_simulator(sim, scene)
+
+
+if __name__ == "__main__":
+    main()
+    simulation_app.close()
+ 
+2- ant_env_cfg.py:  
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
+
+import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
+
+##
+# Pre-defined configs
+##
+from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
+
+
+@configclass
+class MySceneCfg(InteractiveSceneCfg):
+    """Configuration for the terrain scene with an ant robot."""
+
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="average",
+            restitution_combine_mode="average",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
+
+    # robot
+    robot = ANT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    # lights
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
+    )
+
+
+##
+# MDP settings
+##
+
+
+@configclass
+class ActionsCfg:
+    """Action specifications for the MDP."""
+
+    joint_effort = mdp.JointEffortActionCfg(asset_name="robot", joint_names=[".*"], scale=7.5)
+
+
+@configclass
+class ObservationsCfg:
+    """Observation specifications for the MDP."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Observations for the policy."""
+
+        base_height = ObsTerm(func=mdp.base_pos_z)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
+        base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
+        base_angle_to_target = ObsTerm(func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0)})
+        base_up_proj = ObsTerm(func=mdp.base_up_proj)
+        base_heading_proj = ObsTerm(func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0)})
+        joint_pos_norm = ObsTerm(func=mdp.joint_pos_limit_normalized)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.2)
+        feet_body_forces = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot", body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"]
+                )
+            },
+        )
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    # observation groups
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class EventCfg:
+    """Configuration for events."""
+
+    reset_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={"pose_range": {}, "velocity_range": {}},
+    )
+
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.2, 0.2),
+            "velocity_range": (-0.1, 0.1),
+        },
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the MDP."""
+
+    # (1) Reward for moving forward
+    progress = RewTerm(func=mdp.progress_reward, weight=1.0, params={"target_pos": (1000.0, 0.0, 0.0)})
+    # (2) Stay alive bonus
+    alive = RewTerm(func=mdp.is_alive, weight=0.5)
+    # (3) Reward for non-upright posture
+    upright = RewTerm(func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93})
+    # (4) Reward for moving in the right direction
+    move_to_target = RewTerm(
+        func=mdp.move_to_target_bonus, weight=0.5, params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0)}
+    )
+    # (5) Penalty for large action commands
+    action_l2 = RewTerm(func=mdp.action_l2, weight=-0.005)
+    # (6) Penalty for energy consumption
+    energy = RewTerm(func=mdp.power_consumption, weight=-0.05, params={"gear_ratio": {".*": 15.0}})
+    # (7) Penalty for reaching close to joint limits
+    joint_pos_limits = RewTerm(
+        func=mdp.joint_pos_limits_penalty_ratio, weight=-0.1, params={"threshold": 0.99, "gear_ratio": {".*": 15.0}}
+    )
+
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    # (1) Terminate if the episode length is exceeded
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    # (2) Terminate if the robot falls
+    torso_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.31})
+
+
+@configclass
+class AntEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the MuJoCo-style Ant walking environment."""
+
+    # Scene settings
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=True)
+    # Basic settings
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    # MDP settings
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    events: EventCfg = EventCfg()
+
+    def __post_init__(self):
+        """Post initialization."""
+        # general settings
+        self.decimation = 2
+        self.episode_length_s = 16.0
+        # simulation settings
+        self.sim.dt = 1 / 120.0
+        self.sim.render_interval = self.decimation
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        # default friction material
+        self.sim.physics_material.static_friction = 1.0
+        self.sim.physics_material.dynamic_friction = 1.0
+        self.sim.physics_material.restitution = 0.0
+
+3- humanoid_env_cfg.py:  
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
+
+import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
+
+from isaaclab_assets.robots.humanoid import HUMANOID_CFG  # isort:skip
+
+
+##
+# Scene definition
+##
+
+
+@configclass
+class MySceneCfg(InteractiveSceneCfg):
+    """Configuration for the terrain scene with a humanoid robot."""
+
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0, restitution=0.0),
+        debug_vis=False,
+    )
+
+    # robot
+    robot = HUMANOID_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    # lights
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
+    )
+
+
+##
+# MDP settings
+##
+
+
+@configclass
+class ActionsCfg:
+    """Action specifications for the MDP."""
+
+    joint_effort = mdp.JointEffortActionCfg(
+        asset_name="robot",
+        joint_names=[".*"],
+        scale={
+            ".*_waist.*": 67.5,
+            ".*_upper_arm.*": 67.5,
+            "pelvis": 67.5,
+            ".*_lower_arm": 45.0,
+            ".*_thigh:0": 45.0,
+            ".*_thigh:1": 135.0,
+            ".*_thigh:2": 45.0,
+            ".*_shin": 90.0,
+            ".*_foot.*": 22.5,
+        },
+    )
+
+
+@configclass
+class ObservationsCfg:
+    """Observation specifications for the MDP."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Observations for the policy."""
+
+        base_height = ObsTerm(func=mdp.base_pos_z)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.25)
+        base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
+        base_angle_to_target = ObsTerm(func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0)})
+        base_up_proj = ObsTerm(func=mdp.base_up_proj)
+        base_heading_proj = ObsTerm(func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0)})
+        joint_pos_norm = ObsTerm(func=mdp.joint_pos_limit_normalized)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.1)
+        feet_body_forces = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.01,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["left_foot", "right_foot"])},
+        )
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    # observation groups
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class EventCfg:
+    """Configuration for events."""
+
+    reset_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={"pose_range": {}, "velocity_range": {}},
+    )
+
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.2, 0.2),
+            "velocity_range": (-0.1, 0.1),
+        },
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the MDP."""
+
+    # (1) Reward for moving forward
+    progress = RewTerm(func=mdp.progress_reward, weight=1.0, params={"target_pos": (1000.0, 0.0, 0.0)})
+    # (2) Stay alive bonus
+    alive = RewTerm(func=mdp.is_alive, weight=2.0)
+    # (3) Reward for non-upright posture
+    upright = RewTerm(func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93})
+    # (4) Reward for moving in the right direction
+    move_to_target = RewTerm(
+        func=mdp.move_to_target_bonus, weight=0.5, params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0)}
+    )
+    # (5) Penalty for large action commands
+    action_l2 = RewTerm(func=mdp.action_l2, weight=-0.01)
+    # (6) Penalty for energy consumption
+    energy = RewTerm(
+        func=mdp.power_consumption,
+        weight=-0.005,
+        params={
+            "gear_ratio": {
+                ".*_waist.*": 67.5,
+                ".*_upper_arm.*": 67.5,
+                "pelvis": 67.5,
+                ".*_lower_arm": 45.0,
+                ".*_thigh:0": 45.0,
+                ".*_thigh:1": 135.0,
+                ".*_thigh:2": 45.0,
+                ".*_shin": 90.0,
+                ".*_foot.*": 22.5,
+            }
+        },
+    )
+    # (7) Penalty for reaching close to joint limits
+    joint_pos_limits = RewTerm(
+        func=mdp.joint_pos_limits_penalty_ratio,
+        weight=-0.25,
+        params={
+            "threshold": 0.98,
+            "gear_ratio": {
+                ".*_waist.*": 67.5,
+                ".*_upper_arm.*": 67.5,
+                "pelvis": 67.5,
+                ".*_lower_arm": 45.0,
+                ".*_thigh:0": 45.0,
+                ".*_thigh:1": 135.0,
+                ".*_thigh:2": 45.0,
+                ".*_shin": 90.0,
+                ".*_foot.*": 22.5,
+            },
+        },
+    )
+
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    # (1) Terminate if the episode length is exceeded
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    # (2) Terminate if the robot falls
+    torso_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.8})
+
+
+@configclass
+class HumanoidEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the MuJoCo-style Humanoid walking environment."""
+
+    # Scene settings
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=True)
+    # Basic settings
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    # MDP settings
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    events: EventCfg = EventCfg()
+
+    def __post_init__(self):
+        """Post initialization."""
+        # general settings
+        self.decimation = 2
+        self.episode_length_s = 16.0
+        # simulation settings
+        self.sim.dt = 1 / 120.0
+        self.sim.render_interval = self.decimation
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        # default friction material
+        self.sim.physics_material.static_friction = 1.0
+        self.sim.physics_material.dynamic_friction = 1.0
+        self.sim.physics_material.restitution = 0.0
+
+4- humanoid_and_ant_env_cfg.py:  
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
+
+import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
+
+from isaaclab_assets.robots.humanoid import HUMANOID_CFG  # isort:skip
+from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
+
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+
+##
+# Scene definition
+##
+# ArticulationCfg dogru yerde, onu isaaclab.assets'ten aliyoruz
+from isaaclab.assets import ArticulationCfg
+# ImplicitActuatorCfg ise isaaclab.actuators mod�l�nde
+from isaaclab.sim.spawners import UsdFileCfg # <-- UsdFileCfg I�IN DOGRU IMPORT
+import isaaclab.sim as sim_utils
+from isaaclab.actuators import ImplicitActuatorCfg
+
+
+JETBOT_CONFIG = ArticulationCfg(
+    prim_path="{ENV_REGEX_NS}/Vehicle",
+    spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NVIDIA/Jetbot/jetbot.usd"),
+
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(6.0, 0.0, 0.5),
+        rot=(0.707, 0, 0, 0.707)
+    ),
+
+    actuators={
+        "wheels": ImplicitActuatorCfg(
+            joint_names_expr=["left_wheel_joint", "right_wheel_joint"],
+            stiffness=0.0,
+            damping=0.0,
+            # ILERI D�ZEY: Akt�at�rlere limit eklemek (opsiyonel)
+            # Tekerleklerin d�nebilecegi maksimum hizi (rad/s) sinirlar.
+            # �rnegin 100 rad/s, 0.03m yari�apla yaklasik 3 m/s hiza denk gelir.
+            velocity_limit=100.0,
+            # Motorun uygulayabilecegi maksimum torku (Nm) sinirlar.
+            # Bu, aracin ne kadar hizli ivmelenecegini etkiler.
+            effort_limit=5.0,
+        )
+    },
+)
+
+
+@configclass
+class MySceneCfg(InteractiveSceneCfg):
+    """Configuration for the terrain scene with a humanoid robot."""
+
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0, restitution=0.0),
+        debug_vis=False,
+    )
+
+    # robot
+    robot = HUMANOID_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot2 = ANT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot2")
+
+    # lights
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
+    )
+
+
+
+    # Location
+    hospital = AssetBaseCfg(
+        prim_path="/World/Hospital",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Environments/Hospital/hospital.usd",
+        )
+    )
+
+    # Other Robots
+    vehicle = JETBOT_CONFIG
+    
+    
+    # Assets
+    table = AssetBaseCfg(
+            prim_path="/World/Table",
+            # Correctly define the initial state with position here
+            init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 1.0)),
+            spawn=sim_utils.UsdFileCfg(
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd",
+            )
+        )
+
+
+import torch
+from typing import Optional
+
+# ... (diger �st d�zey importlariniz) ...
+
+# YENI ve GEREKLI IMPORTLAR
+from isaaclab.managers import ManagerBase
+from isaaclab.assets import Articulation
+# ManagerBasedEnv'nin tam yolunu belirtmek daha saglamdir
+from isaaclab.envs.manager_based_env import ManagerBasedEnv
+
+# ... (JETBOT_CONFIG ve diger yapilandirma siniflariniz) ...
+
+
+# Tekerlekli araci kontrol etmek i�in �zel y�netici sinifi
+class WheeledVehicleController(ManagerBase):  # <-- Artik 'ManagerBase' taniniyor
+    """
+    Belirtilen bir JetBot'a sabit bir ileri hiz komutu g�nderen basit bir kontrolc�.
+    """
+
+    def __init__(self, asset_name: str, target_velocity: float, wheel_radius: float, env: ManagerBasedEnv):
+        super().__init__({}, env)
+        self.robot: Articulation = self._env.scene[asset_name]
+        self.target_velocity = target_velocity
+        self.wheel_radius = wheel_radius
+
+        self._wheel_joint_names = ["left_wheel_joint", "right_wheel_joint"]
+        self._wheel_joint_indices = self.robot.find_joints(self._wheel_joint_names)[0]
+
+        self._device = self._env.device
+
+    def perform_action(self):
+        """Her sim�lasyon adiminda �agrilir ve tekerleklere hiz komutu uygular."""
+        if self.wheel_radius <= 0:
+            return
+
+        angular_velocity = self.target_velocity / self.wheel_radius
+        num_envs = self._env.num_envs
+        targets = torch.full((num_envs, len(self._wheel_joint_indices)), angular_velocity, device=self._device)
+        self.robot.set_joint_velocity_target(targets, joint_indices=self._wheel_joint_indices)
+
+
+@configclass
+class ActionsCfg:
+    """Action specifications for the MDP."""
+
+    joint_effort_humanoid = mdp.JointEffortActionCfg(
+        asset_name="robot",  # Bu 'robot' (Humanoid) i�in
+        joint_names=[".*"],
+        scale={
+            ".*_waist.*": 67.5,
+            ".*_upper_arm.*": 67.5,
+            "pelvis": 67.5,
+            ".*_lower_arm": 45.0,
+            ".*_thigh:0": 45.0,
+            ".*_thigh:1": 135.0,
+            ".*_thigh:2": 45.0,
+            ".*_shin": 90.0,
+            ".*_foot.*": 22.5,
+        },
+    )
+    
+    joint_effort_ant = mdp.JointEffortActionCfg(
+        asset_name="robot2",  # D�ZELTME: Bu 'robot2' (Ant) i�in
+        joint_names=[".*"],
+        scale=7.5
+    )
+    
+
+
+@configclass
+class ObservationsCfg:
+    """Birden fazla robot i�in birlestirilmis ve tek bir 'policy' grubunda toplanmis g�zlem �zellikleri."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Her iki robotun g�zlemlerini i�eren birlesik politika grubu."""
+
+        # -- Robot 1 (Humanoid) G�zlemleri --
+        # Her terime, hangi robota ait oldugunu belirtmek i�in bir sonek ekliyoruz (_robot)
+        base_height_robot = ObsTerm(func=mdp.base_pos_z, params={"asset_cfg": SceneEntityCfg("robot")})
+        base_lin_vel_robot = ObsTerm(func=mdp.base_lin_vel, params={"asset_cfg": SceneEntityCfg("robot")})
+        base_ang_vel_robot = ObsTerm(func=mdp.base_ang_vel, scale=0.25, params={"asset_cfg": SceneEntityCfg("robot")})
+        base_yaw_roll_robot = ObsTerm(func=mdp.base_yaw_roll, params={"asset_cfg": SceneEntityCfg("robot")})
+        base_angle_to_target_robot = ObsTerm(
+            func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")}
+        )
+        base_up_proj_robot = ObsTerm(func=mdp.base_up_proj, params={"asset_cfg": SceneEntityCfg("robot")})
+        base_heading_proj_robot = ObsTerm(
+            func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")}
+        )
+        joint_pos_norm_robot = ObsTerm(func=mdp.joint_pos_limit_normalized, params={"asset_cfg": SceneEntityCfg("robot")})
+        joint_vel_rel_robot = ObsTerm(func=mdp.joint_vel_rel, scale=0.1, params={"asset_cfg": SceneEntityCfg("robot")})
+        feet_body_forces_robot = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.01,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["left_foot", "right_foot"])},
+        )
+        actions_robot = ObsTerm(func=mdp.last_action, params={"action_name": "joint_effort_humanoid"})
+
+        # -- Robot 2 (Ant) G�zlemleri --
+        # Terim adlarinin �akismamasi i�in sonek (_robot2) kullaniyoruz
+        base_height_robot2 = ObsTerm(func=mdp.base_pos_z, params={"asset_cfg": SceneEntityCfg("robot2")})
+        base_lin_vel_robot2 = ObsTerm(func=mdp.base_lin_vel, params={"asset_cfg": SceneEntityCfg("robot2")})
+        base_ang_vel_robot2 = ObsTerm(func=mdp.base_ang_vel, params={"asset_cfg": SceneEntityCfg("robot2")})
+        base_yaw_roll_robot2 = ObsTerm(func=mdp.base_yaw_roll, params={"asset_cfg": SceneEntityCfg("robot2")})
+        base_angle_to_target_robot2 = ObsTerm(
+            func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot2")}
+        )
+        base_up_proj_robot2 = ObsTerm(func=mdp.base_up_proj, params={"asset_cfg": SceneEntityCfg("robot2")})
+        base_heading_proj_robot2 = ObsTerm(
+            func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot2")}
+        )
+        joint_pos_norm_robot2 = ObsTerm(func=mdp.joint_pos_limit_normalized, params={"asset_cfg": SceneEntityCfg("robot2")})
+        joint_vel_rel_robot2 = ObsTerm(func=mdp.joint_vel_rel, scale=0.2, params={"asset_cfg": SceneEntityCfg("robot2")})
+        feet_body_forces_robot2 = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot2", body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"]
+                )
+            },
+        )
+        actions_robot2 = ObsTerm(func=mdp.last_action, params={"action_name": "joint_effort_ant"})
+
+        def __post_init__(self):
+            # T�m bu terimleri tek bir vekt�rde birlestir
+            self.concatenate_terms = True
+            self.enable_corruption = False
+
+    # RSL-RL'in bekledigi 'policy' adinda tek bir grup olusturuyoruz.
+    policy: PolicyCfg = PolicyCfg()
+    
+
+@configclass
+class EventCfg:
+    """Her robot i�in ayri baslangi� konumlari tanimlanmis olay yapilandirmasi."""
+
+    # -- Robot 1 (Humanoid) i�in Sifirlama Olaylari --
+    reset_robot_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            # D�ZELTME: Humanoid i�in belirli bir baslangi� b�lgesi tanimlandi.
+            "pose_range": {
+                "x": (-0.5, 0.5),       # X ekseninde k���k bir aralikta
+                "y": (-1.5, -1.0),      # Y ekseninin negatif tarafinda
+                "z": (1.1, 1.1),        # Yere d�smemesi i�in sabit bir y�kseklikte
+                "yaw": (-3.14, 3.14),   # Rastgele bir baslangi� a�isi
+            },
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.2, 0.2),
+            "velocity_range": (-0.1, 0.1),
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    # -- Robot 2 (Ant) i�in Sifirlama Olaylari --
+    reset_robot2_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            # D�ZELTME: Ant i�in Humanoid ile �akismayan farkli bir b�lge tanimlandi.
+            "pose_range": {
+                "x": (-0.5, 0.5),       # X ekseninde k���k bir aralikta
+                "y": (1.0, 1.5),        # Y ekseninin pozitif tarafinda
+                "z": (0.4, 0.4),        # Ant'in boyuna uygun sabit bir y�kseklikte
+                "yaw": (-3.14, 3.14),   # Rastgele bir baslangi� a�isi
+            },
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("robot2"),
+        },
+    )
+
+    reset_robot2_joints = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.2, 0.2),
+            "velocity_range": (-0.1, 0.1),
+            "asset_cfg": SceneEntityCfg("robot2"),
+        },
+    )
+
+
+
+configclass
+class RewardsCfg:
+    """Birden fazla robot i�in birlestirilmis ve d�zeltilmis �d�l terimleri."""
+
+    # -- Robot 1 (Humanoid) i�in �d�l Terimleri --
+    # Not: Varlik adi 'robot' olarak g�ncellendi ve asset_cfg kullanildi.
+
+    progress_robot = RewTerm(
+        func=mdp.progress_reward,
+        weight=1.0,
+        params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
+    )
+    alive_robot = RewTerm(func=mdp.is_alive, weight=2.0, params={"asset_cfg": SceneEntityCfg("robot")})
+    upright_robot = RewTerm(
+        func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93, "asset_cfg": SceneEntityCfg("robot")}
+    )
+    move_to_target_robot = RewTerm(
+        func=mdp.move_to_target_bonus,
+        weight=0.5,
+        params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
+    )
+    action_l2_robot = RewTerm(func=mdp.action_l2, weight=-0.01, params={"asset_cfg": SceneEntityCfg("robot")})
+    energy_robot = RewTerm(
+        func=mdp.power_consumption,
+        weight=-0.005,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "gear_ratio": {
+                ".*_waist.*": 67.5,
+                ".*_upper_arm.*": 67.5,
+                "pelvis": 67.5,
+                ".*_lower_arm": 45.0,
+                ".*_thigh:0": 45.0,
+                ".*_thigh:1": 135.0,
+                ".*_thigh:2": 45.0,
+                ".*_shin": 90.0,
+                ".*_foot.*": 22.5,
+            },
+        },
+    )
+    joint_pos_limits_robot = RewTerm(
+        func=mdp.joint_pos_limits_penalty_ratio,
+        weight=-0.25,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "threshold": 0.98,
+            "gear_ratio": {
+                ".*_waist.*": 67.5,
+                ".*_upper_arm.*": 67.5,
+                "pelvis": 67.5,
+                ".*_lower_arm": 45.0,
+                ".*_thigh:0": 45.0,
+                ".*_thigh:1": 135.0,
+                ".*_thigh:2": 45.0,
+                ".*_shin": 90.0,
+                ".*_foot.*": 22.5,
+            },
+        },
+    )
+
+    # -- Robot 2 (Ant) i�in �d�l Terimleri --
+    # Not: Varlik adi 'robot2' olarak g�ncellendi ve asset_cfg kullanildi.
+
+    progress_robot2 = RewTerm(
+        func=mdp.progress_reward,
+        weight=1.0,
+        params={"target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot2")},
+    )
+    alive_robot2 = RewTerm(func=mdp.is_alive, weight=0.5, params={"asset_cfg": SceneEntityCfg("robot2")})
+    upright_robot2 = RewTerm(
+        func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93, "asset_cfg": SceneEntityCfg("robot2")}
+    )
+    move_to_target_robot2 = RewTerm(
+        func=mdp.move_to_target_bonus,
+        weight=0.5,
+        params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0), "asset_cfg": SceneEntityCfg("robot2")},
+    )
+    action_l2_robot2 = RewTerm(func=mdp.action_l2, weight=-0.005, params={"asset_cfg": SceneEntityCfg("robot2")})
+    energy_robot2 = RewTerm(
+        func=mdp.power_consumption, weight=-0.05, params={"gear_ratio": {".*": 15.0}, "asset_cfg": SceneEntityCfg("robot2")}
+    )
+    joint_pos_limits_robot2 = RewTerm(
+        func=mdp.joint_pos_limits_penalty_ratio,
+        weight=-0.1,
+        params={"threshold": 0.99, "gear_ratio": {".*": 15.0}, "asset_cfg": SceneEntityCfg("robot2")},
+    )
+
+
+@configclass
+class TerminationsCfg:
+    """Birden fazla robot i�in birlestirilmis ve d�zeltilmis sonlandirma kosullari."""
+
+    # (1) B�l�m (episode) s�resi dolarsa sonlandir (global kosul)
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+
+    # (2) Robot 1'in (Humanoid) d�smesi durumunda sonlandir
+    torso_height_robot = DoneTerm(
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": 0.8, "asset_cfg": SceneEntityCfg("robot")},
+    )
+
+    # (3) Robot 2'nin (Ant) d�smesi durumunda sonlandir
+    torso_height_robot2 = DoneTerm(
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": 0.31, "asset_cfg": SceneEntityCfg("robot2")},
+    )
+
+
+
+from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
+
+# ... (WheeledVehicleController sinifiniz ve diger yapilandirmalariniz) ...
+
+# YENI: �alisma zamani mantigini i�eren �zel ortam sinifi
+class HumanoidVehicleEnv(ManagerBasedRLEnv):
+    """
+    Humanoid ve Ant ajanlarinin yani sira komut dosyasiyla kontrol edilen
+    bir JetBot'u i�eren �zel bir ortam.
+    """
+
+    def __init__(self, cfg: ManagerBasedRLEnvCfg):
+        """�zel y�neticimizi (vehicle_manager) burada baslatiyoruz."""
+        # �nce �st sinifin __init__'ini �agirarak standart kurulumu yap
+        super().__init__(cfg)
+        
+        # Simdi �zel y�neticimizi olustur
+        self.vehicle_manager = WheeledVehicleController(
+            asset_name="vehicle",
+            target_velocity=3.5,
+            wheel_radius=0.03,
+            env=self
+        )
+
+    def _update_sim_step(self, dt: float):
+        """Her sim�lasyon adiminda �zel y�neticimizi �alistiriyoruz."""
+        # �nce �st sinifin standart g�ncelleme adimlarini �alistir
+        super()._update_sim_step(dt)
+        
+        # Simdi JetBot'a komut vermek i�in kendi y�neticimizi �alistir
+        self.vehicle_manager.perform_action()
+
+@configclass
+class HumanoidEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the MuJoCo-style Humanoid walking environment."""
+
+    # DEGISTI: Artik bu sinif, bizim �zel ortam sinifimizi kullanacak.
+    env_class = HumanoidVehicleEnv
+
+    # Mevcut scene, observations, actions vb. yapilandirmalariniz ayni kalir
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=True)
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    events: EventCfg = EventCfg()
+
+    # KALDIRILDI: __init__ ve _update_sim_step fonksiyonlarini bu siniftan tamamen silin.
+    # Onlari yukaridaki HumanoidVehicleEnv sinifina tasidik.
+
+    def __post_init__(self):
+        """Post initialization."""
+        # Bu fonksiyon kalabilir, ��nk� bu �alisma zamani degil, yapilandirma ayaridir.
+        self.decimation = 2
+        self.episode_length_s = 16.0
+        self.sim.dt = 1 / 120.0
+        self.sim.render_interval = self.decimation
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        self.sim.physics_material.static_friction = 1.0
+        self.sim.physics_material.dynamic_friction = 1.0
+        self.sim.physics_material.restitution = 0.0

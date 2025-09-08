@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 EXTENSION_TITLE = "OSS Chat"
 
 EXTENSION_DESCRIPTION = "Chat with LLM models through Ollama from Isaac Sim."
@@ -21,16 +23,27 @@ EXTENSION_DESCRIPTION = "Chat with LLM models through Ollama from Isaac Sim."
 DEFAULT_OLLAMA_HOST = "http://192.168.1.11:11500"
 DEFAULT_MODEL = "llama3.2"
 
-# System prompt - hardcoded for all conversations
-SYSTEM_PROMPT = """You are a helpful AI assistant integrated into NVIDIA Isaac Sim, a robotics simulation platform. You are knowledgeable about:
+# System prompt - loaded from file
+def load_system_prompt():
+    """Load system prompt from system_prompt.txt file"""
+    try:
+        # Get the directory containing this file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Go up one level to the extension root directory
+        extension_root = os.path.dirname(current_dir)
+        # Path to system_prompt.txt
+        prompt_file = os.path.join(extension_root, "system_prompt.txt")
+        
+        if os.path.exists(prompt_file):
+            with open(prompt_file, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        else:
+            # Fallback system prompt if file doesn't exist
+            return "You are a helpful AI assistant integrated into NVIDIA Isaac Sim."
+    except Exception as e:
+        print(f"Error loading system prompt: {e}")
+        # Fallback system prompt if there's an error
+        return "You are a helpful AI assistant integrated into NVIDIA Isaac Sim."
 
-- Robotics and autonomous systems
-- 3D simulation and physics
-- NVIDIA Omniverse and Isaac Sim
-- Python programming for robotics
-- USD (Universal Scene Description)
-- Computer vision and AI for robotics
-- ROS (Robot Operating System)
-- Simulation best practices
-
-You provide clear, practical advice and can help with both technical implementation and conceptual understanding. Keep responses concise but informative, and always consider the robotics simulation context when relevant."""
+# Load the system prompt from file
+SYSTEM_PROMPT = load_system_prompt()
